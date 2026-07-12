@@ -211,36 +211,201 @@
 
 
    /* Swiper
-    * ------------------------------------------------------ */ 
+    * ------------------------------------------------------ */
     const ssSwiper = function() {
 
         const mySwiper = new Swiper('.swiper-container', {
 
-            slidesPerView: 1,
+            slidesPerView: 1.15,
+            spaceBetween: 16,
             pagination: {
                 el: '.swiper-pagination',
                 clickable: true,
             },
             breakpoints: {
-                // when window width is > 400px
-                401: {
-                    slidesPerView: 1,
+                600: {
+                    slidesPerView: 2,
                     spaceBetween: 20
                 },
-                // when window width is > 800px
-                801: {
-                    slidesPerView: 2,
-                    spaceBetween: 32
+                900: {
+                    slidesPerView: 3,
+                    spaceBetween: 24
                 },
-                // when window width is > 1200px
-                1201: {
-                    slidesPerView: 2,
-                    spaceBetween: 80
+                1200: {
+                    slidesPerView: 4,
+                    spaceBetween: 28
                 }
             }
          });
 
+        return mySwiper;
+
     }; // end ssSwiper
+
+
+   /* Youtube Carousel
+    * ------------------------------------------------------ */
+    const ssEscapeHtml = function(value) {
+        const div = document.createElement('div');
+        div.textContent = value;
+        return div.innerHTML;
+    }; // end ssEscapeHtml
+
+    const ssParseIsoDuration = function(iso) {
+        const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso || '') || [];
+        const hours = parseInt(match[1] || '0', 10);
+        const minutes = parseInt(match[2] || '0', 10);
+        const seconds = parseInt(match[3] || '0', 10);
+        const pad = function(value) { return String(value).padStart(2, '0'); };
+
+        if (hours > 0) {
+            return hours + ':' + pad(minutes) + ':' + pad(seconds);
+        }
+        return minutes + ':' + pad(seconds);
+    }; // end ssParseIsoDuration
+
+    const ssBuildYoutubeCardHtml = function(video) {
+        return '<div class="swiper-slide youtube-card">'
+            + '<a class="youtube-card__link" href="https://www.youtube.com/watch?v=' + video.id + '"'
+            + ' target="_blank" rel="noopener" data-video-id="' + video.id + '">'
+            + '<span class="youtube-card__thumb-wrap">'
+            + '<img class="youtube-card__thumb"'
+            + ' src="https://i.ytimg.com/vi/' + video.id + '/hqdefault.jpg" alt="" loading="lazy">'
+            + '<span class="youtube-card__play" aria-hidden="true"></span>'
+            + '<span class="youtube-card__duration">' + ssEscapeHtml(video.duration) + '</span>'
+            + '</span>'
+            + '<span class="youtube-card__title">' + ssEscapeHtml(video.title) + '</span>'
+            + '</a>'
+            + '</div>';
+    }; // end ssBuildYoutubeCardHtml
+
+    const ssYoutubeCarousel = function(mySwiper) {
+
+        const YOUTUBE_CHANNEL_ID = 'UCaY7glP16mvh509i_o_WU4Q';
+        const YOUTUBE_API_KEY = 'AIzaSyDCPOBwNPVBI7H32fQ91_prDFtfg_H0goY'; // Google Cloud Console에서 발급한 HTTP 리퍼러 제한 키
+        const MAX_RESULTS = 7;
+
+        const wrapper = document.querySelector('[data-youtube-carousel]');
+        if (!wrapper || !mySwiper) {
+            return;
+        }
+
+        wrapper.addEventListener('click', function(event) {
+            const link = event.target.closest('[data-video-id]');
+            if (!link) {
+                return;
+            }
+            event.preventDefault();
+            ssOpenVideoLightbox(link.getAttribute('data-video-id'));
+        });
+
+        if (YOUTUBE_API_KEY === 'YOUR_YOUTUBE_API_KEY') {
+            return;
+        }
+
+        const searchEndpoint = 'https://www.googleapis.com/youtube/v3/search'
+            + '?key=' + YOUTUBE_API_KEY
+            + '&channelId=' + YOUTUBE_CHANNEL_ID
+            + '&part=snippet'
+            + '&order=date'
+            + '&type=video'
+            + '&maxResults=' + MAX_RESULTS;
+
+        fetch(searchEndpoint)
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('YouTube search request failed: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                const videoIds = (data.items || [])
+                    .filter(function(item) { return item.id && item.id.videoId; })
+                    .map(function(item) { return item.id.videoId; });
+
+                if (!videoIds.length) {
+                    return;
+                }
+
+                const detailsEndpoint = 'https://www.googleapis.com/youtube/v3/videos'
+                    + '?key=' + YOUTUBE_API_KEY
+                    + '&id=' + videoIds.join(',')
+                    + '&part=snippet,contentDetails';
+
+                return fetch(detailsEndpoint)
+                    .then(function(response) {
+                        if (!response.ok) {
+                            throw new Error('YouTube videos request failed: ' + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(function(detailsData) {
+                        const detailsById = {};
+                        (detailsData.items || []).forEach(function(item) {
+                            detailsById[item.id] = item;
+                        });
+
+                        const videos = videoIds
+                            .map(function(id) { return detailsById[id]; })
+                            .filter(Boolean)
+                            .map(function(item) {
+                                return {
+                                    id: item.id,
+                                    title: item.snippet.title,
+                                    duration: ssParseIsoDuration(item.contentDetails.duration)
+                                };
+                            });
+
+                        if (!videos.length) {
+                            return;
+                        }
+
+                        mySwiper.removeAllSlides();
+                        mySwiper.appendSlide(videos.map(ssBuildYoutubeCardHtml));
+                    });
+            })
+            .catch(function(error) {
+                console.error('YouTube feed load failed, keeping fallback videos.', error);
+            });
+
+    }; // end ssYoutubeCarousel
+
+
+   /* Video Lightbox
+    * ------------------------------------------------------ */
+    const ssOpenVideoLightbox = function(videoId) {
+
+        const iframe = document.createElement('iframe');
+        iframe.src = 'https://www.youtube.com/embed/' + videoId + '?autoplay=1&rel=0';
+        iframe.title = 'YouTube video player';
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+        iframe.setAttribute('allowfullscreen', '');
+        iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+
+        const wrapper = document.createElement('div');
+        wrapper.appendChild(iframe);
+
+        const onEscape = function(event) {
+            event = event || window.event;
+            if (event.keyCode === 27) {
+                instance.close();
+            }
+        };
+
+        const instance = basicLightbox.create(wrapper, {
+            className: 'youtube-lightbox',
+            onShow: function() {
+                document.addEventListener('keydown', onEscape);
+            },
+            onClose: function() {
+                document.removeEventListener('keydown', onEscape);
+            }
+        });
+
+        instance.show();
+
+    }; // end ssOpenVideoLightbox
 
 
    /* Lightbox
@@ -354,7 +519,8 @@
         ssMobileMenu();
         ssScrollSpy();
         ssViewAnimate();
-        ssSwiper();
+        const youtubeSwiper = ssSwiper();
+        ssYoutubeCarousel(youtubeSwiper);
         ssLightbox();
         ssAlertBoxes();
         ssMoveTo();
